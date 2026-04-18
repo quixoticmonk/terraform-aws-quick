@@ -1,0 +1,9 @@
+name_prefix  = "orders-dev"
+region       = "us-west-2"
+admin_group  = "orders-bi-admins"
+author_group = "orders-bi-authors"
+reader_group = "orders-bi-readers"
+
+# ARN of a template authored via the QuickSight console + CreateTemplate API.
+# See README for how to produce this.
+orders_template_arn = "arn:aws:quicksight:us-west-2:111111111111:template/orders-overview-v1"

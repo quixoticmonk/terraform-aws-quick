@@ -1,0 +1,156 @@
+name_prefix = "storefront-dev"
+region      = "us-west-2"
+
+# Groups
+admin_group  = "storefront-bi-admins"
+author_group = "storefront-bi-authors"
+reader_group = "storefront-bi-readers"
+
+# Service-role scope
+s3_bucket_names       = ["storefront-campaign-exports"]
+redshift_cluster_arns = []
+
+# VPC connection — required for any data source with use_vpc = true below
+vpc_id     = "vpc-0123456789abcdef0"
+subnet_ids = ["subnet-0aaaa", "subnet-0bbbb"]
+
+################################################################################
+# Analyses and dashboards (optional)
+################################################################################
+# The module publishes analyses/dashboards from a pre-authored template — it
+# does not author the `definition` block. Workflow:
+#   1. Build the analysis in the QuickSight console against dev datasets.
+#   2. Export it to a template: `aws quicksight create-template ...`.
+#   3. Put the template ARN below and set create_analyses_and_dashboards = true.
+# Dataset references wire the template's placeholders to the module's datasets
+# by key — see the `analyses` / `dashboards` blocks in main.tf.
+################################################################################
+create_analyses_and_dashboards = false
+sales_template_arn             = "" # "arn:aws:quicksight:us-west-2:111111111111:template/sales-overview-v3"
+
+
+################################################################################
+# Data sources — the MAP KEY becomes the identifier datasets reference.
+################################################################################
+# Four types supported: REDSHIFT, ATHENA, POSTGRESQL, S3.
+#
+# Required fields by type:
+#   REDSHIFT   → credential_secret_arn, host, port, database
+#   POSTGRESQL → credential_secret_arn, host, port, database
+#   ATHENA     → work_group (defaults to "primary")
+#   S3         → s3_bucket, s3_key (pointing at a QuickSight manifest.json)
+#
+# use_vpc = true requires create_vpc_connection = true at the module level.
+################################################################################
+data_sources = {
+  # key: "warehouse" → transactional Redshift (orders, customers, products)
+  warehouse = {
+    type                  = "REDSHIFT"
+    credential_secret_arn = "arn:aws:secretsmanager:us-west-2:111111111111:secret:storefront/redshift-admin-abc"
+    database              = "storefront"
+    host                  = "warehouse.xyz.us-west-2.redshift.amazonaws.com"
+    port                  = 5439
+    use_vpc               = true # routes through the QuickSight VPC connection
+
+    # extra_permissions layer on top of the module-level admin/author/reader grants.
+    # Role must be "owner" or "reader"; owner wins on duplicate principals.
+    extra_permissions = [
+      { principal_arn = "arn:aws:quicksight:us-west-2:111111111111:group/default/cross-team-bi", role = "owner" },
+    ]
+  }
+
+  # key: "lake" → historical/partitioned data in Glue catalog over S3, queried via Athena
+  lake = {
+    type       = "ATHENA"
+    work_group = "storefront_analytics"
+  }
+
+  # key: "exports" → third-party campaign-cost CSV drops
+  exports = {
+    type      = "S3"
+    s3_bucket = "storefront-campaign-exports"
+    s3_key    = "manifests/campaign-costs.json"
+  }
+}
+
+################################################################################
+# Datasets — each dataset's `data_source_key` MUST match a key in data_sources.
+################################################################################
+# source_type determines which fields are required:
+#
+#   relational_table → catalog, schema, table_name, columns (>= 1)
+#                       Use with ATHENA, REDSHIFT, POSTGRESQL.
+#
+#   custom_sql        → sql_query; columns optional
+#                       Use with ATHENA, REDSHIFT, POSTGRESQL.
+#
+#   s3_source         → columns (>= 1); optional s3_format / s3_delimiter
+#                       MUST reference an S3-type data source.
+#
+# import_mode:
+#   SPICE         → data is ingested and cached in QuickSight (fast, refresh-scheduled)
+#   DIRECT_QUERY  → queries hit the source each time
+#
+# File-based fallbacks (this example only — see main.tf locals):
+#   datasets/<key>/query.sql    → loaded into sql_query when left as ""
+#   datasets/<key>/columns.json → loaded into columns when left as []
+# Inline values always win over file-based fallbacks.
+################################################################################
+datasets = {
+  # Redshift → relational_table, SPICE. Columns loaded from datasets/orders_last_30d/columns.json.
+  orders_last_30d = {
+    import_mode     = "SPICE"
+    data_source_key = "warehouse" # ← matches data_sources["warehouse"]
+    source_type     = "relational_table"
+    catalog         = ""
+    schema          = "public"
+    table_name      = "orders_last_30d"
+
+    # SPICE datasets MUST have a refresh schedule or the data goes stale.
+    # Schedule IDs become schedule_id on the resource (stable across applies).
+    refresh_schedules = {
+      daily = {
+        interval     = "DAILY"
+        time_of_day  = "03:00"
+        timezone     = "America/Los_Angeles"
+        refresh_type = "FULL_REFRESH"
+      }
+    }
+  }
+
+  # Athena → custom_sql, DIRECT_QUERY. SQL from datasets/traffic_by_channel/query.sql,
+  # columns from datasets/traffic_by_channel/columns.json.
+  traffic_by_channel = {
+    import_mode     = "DIRECT_QUERY"
+    data_source_key = "lake" # ← matches data_sources["lake"]
+    source_type     = "custom_sql"
+  }
+
+  # S3 → s3_source. Columns inline to demonstrate that inline values override files.
+  campaign_costs = {
+    import_mode     = "SPICE"
+    data_source_key = "exports" # ← matches data_sources["exports"]
+    source_type     = "s3_source"
+    s3_format       = "CSV"
+    s3_delimiter    = ","
+    columns = [
+      { name = "campaign_id", type = "STRING" },
+      { name = "channel", type = "STRING" },
+      { name = "spend_usd", type = "DECIMAL" },
+      { name = "report_date", type = "STRING" },
+    ]
+
+    # Hourly refresh — time_of_day not required for HOURLY/MINUTE* intervals.
+    refresh_schedules = {
+      hourly = {
+        interval     = "HOURLY"
+        refresh_type = "FULL_REFRESH"
+      }
+    }
+
+    # Grant the marketing group read on this dataset in addition to the module-level grants.
+    extra_permissions = [
+      { principal_arn = "arn:aws:quicksight:us-west-2:111111111111:group/default/marketing-readers", role = "reader" },
+    ]
+  }
+}

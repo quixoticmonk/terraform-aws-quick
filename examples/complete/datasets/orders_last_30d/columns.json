@@ -1,0 +1,7 @@
+[
+  {"name": "order_id", "type": "STRING"},
+  {"name": "customer_id", "type": "STRING"},
+  {"name": "order_total", "type": "DECIMAL"},
+  {"name": "currency", "type": "STRING"},
+  {"name": "placed_at", "type": "STRING"}
+]

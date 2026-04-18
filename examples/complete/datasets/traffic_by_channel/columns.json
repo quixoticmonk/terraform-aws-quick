@@ -1,0 +1,7 @@
+[
+  {"name": "channel", "type": "STRING"},
+  {"name": "device_type", "type": "STRING"},
+  {"name": "sessions", "type": "INTEGER"},
+  {"name": "page_views", "type": "INTEGER"},
+  {"name": "conversions", "type": "INTEGER"}
+]

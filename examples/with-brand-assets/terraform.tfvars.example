@@ -1,0 +1,14 @@
+name_prefix = "example-brand"
+region      = "us-west-2"
+
+# Drop real files at these paths before running plan.
+brand_assets = {
+  "logo.png" = {
+    source_path  = "./assets/logo.png"
+    content_type = "image/png"
+  }
+  "favicon.png" = {
+    source_path  = "./assets/favicon.png"
+    content_type = "image/png"
+  }
+}
